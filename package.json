@@ -1,0 +1,37 @@
+{
+  "name": "@leue/rxjs-operators",
+  "version": "1.0.0",
+  "private": false,
+  "keywords": [
+    "library",
+    "ng-packagr",
+    "rxjs"
+  ],
+  "repository": "git@github-private:Carsten-Leue/rxjs-operators.git",
+  "license": "MIT",
+  "author": "Dr. Carsten Leue <carsten.leue@gmx.net>",
+  "scripts": {
+    "build": "ng-packagr -p package.json",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@angular/compiler": "^8.2.14",
+    "@angular/compiler-cli": "^8.2.14",
+    "@angular/core": "^8.2.14",
+    "@types/jest": "^24.0.23",
+    "jest": "^24.9.0",
+    "ng-packagr": "^5.7.1",
+    "rxjs": "^6.4.0",
+    "rxjs-marbles": "^5.0.3",
+    "ts-jest": "^24.1.0",
+    "typescript": "typescript@>=3.4 <3.6",
+    "zone.js": "~0.9.1"
+  },
+  "peerDependencies": {
+    "rxjs": "^6"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "ngPackage": {}
+}
