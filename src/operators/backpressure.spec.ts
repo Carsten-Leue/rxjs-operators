@@ -1,10 +1,20 @@
-import { interval, timer } from "rxjs";
+import { interval, timer, EMPTY } from "rxjs";
 import { marbles } from "rxjs-marbles";
-import { delay, take } from "rxjs/operators";
+import { delay, take, tap } from "rxjs/operators";
 
 import { chunkedBackpressure } from "./backpressure";
 
 describe("backpressure", () => {
+  it("should end correctly", () => {
+    const down$ = EMPTY;
+
+    const src$ = EMPTY;
+
+    const back$ = src$.pipe(chunkedBackpressure((buffer: any[]) => down$));
+
+    return back$.toPromise();
+  });
+
   it(
     "backpressure",
     marbles(m => {

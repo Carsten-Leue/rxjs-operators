@@ -1,16 +1,24 @@
 import { defer, isObservable, merge, Observable, OperatorFunction, Subject, UnaryFunction } from 'rxjs';
-import { concatMap, filter, finalize, scan } from 'rxjs/operators';
+import { concatMap, endWith, filter, finalize, map, scan } from 'rxjs/operators';
 
-import { arrayPush, isEqual, isNotNil } from '../utils/utils';
+import { arrayPush, isEqual } from '../utils/utils';
 
 const IDLE = Symbol();
 declare type IdleType = typeof IDLE;
 
-declare type BackpressureState<T, R> = T[] | Observable<R>;
+const DONE = Symbol();
+declare type DoneType = typeof DONE;
 
-function isIdle(aValue: any): aValue is IdleType {
-  return isEqual(aValue, IDLE);
-}
+const NOTHING = Symbol();
+declare type NothingType = typeof NOTHING;
+
+declare type BackpressureType<T, R> = NothingType | T[] | Observable<R>;
+declare type ScanType<T, R> = [BackpressureType<T, R>, boolean];
+
+const isIdle = (aValue: any): aValue is IdleType => isEqual(aValue, IDLE);
+const isDone = (aValue: any): aValue is DoneType => isEqual(aValue, DONE);
+const isNothing = (aValue: any): aValue is NothingType =>
+  isEqual(aValue, NOTHING);
 
 // array test
 function isBuffer<T>(aValue: any): aValue is T[] {
@@ -32,24 +40,17 @@ function isBusy<R>(aValue: any): aValue is Observable<R> {
 export function chunkedBackpressure<T, R>(
   aDelegate: UnaryFunction<T[], Observable<R>>
 ): OperatorFunction<T, R> {
-  // type safe helper
-  const NOTHING: BackpressureState<T, R> = undefined;
-
   return (src$: Observable<T>) =>
     defer(() => {
       /**
-       * Flag to check if the source sequence is done. We need this to potentially flush the
-       * final buffer.
+       * Source sequence ending with the done flag
        */
-      let bDone = false;
-      /**
-       * Source sequence setting the done flag when it completes
-       */
-      const obj$ = src$.pipe(finalize(() => (bDone = true)));
+      const obj$ = src$.pipe(endWith(DONE));
       /**
        * Triggers when the generated downstream sequence has terminated
        */
       const idle$ = new Subject<IdleType>();
+
       // trigger callback
       const opFinal = finalize<R>(() => idle$.next(IDLE));
       /**
@@ -57,41 +58,90 @@ export function chunkedBackpressure<T, R>(
        */
       return merge(obj$, idle$).pipe(
         /**
-         * The accumulator is either `undefined`, a (non-empty) buffer or an Observable<R>
+         * The accumulator is either NOTHING, a (non-empty) buffer or an Observable<R>
          *
-         * - if `undefined` the downstreams is idle and we do not have a buffer, yet
+         * - if NOTHING the downstreams is idle and we do not have a buffer, yet
          * - if a buffer, downstream is busy and we already have a buffered item
          * - if an observable, downstream is busy but there is no buffered item, yet
          */
         scan(
-          (acc: BackpressureState<T, R>, obj: T | IdleType) =>
+          (
+            [data, bDone]: ScanType<T, R>,
+            obj: T | IdleType | DoneType
+          ): ScanType<T, R> => {
             /**
              * The idle event indicates that downstream had been busy but is idle, now
              */
-            isIdle(obj)
-              ? /**
-                 * if there is data in the buffer, process downstream and reset the buffer
+            if (isIdle(obj)) {
+              /**
+               * if there is data in the buffer, process downstream and reset the buffer
+               */
+              if (isBuffer<T>(data)) {
+                /**
+                 * Process the buffer
                  */
-                isBuffer<T>(acc)
-                ? // process the next chunk of data
-                  aDelegate(acc)
-                : bDone
-                ? // nothing to process, but source is done. Also complete the backpressure stream
-                  idle$.complete()
-                : // nothing to process, downstream is idle, wait for the next regular event
-                  NOTHING
-              : // we have a buffer, append to it
-              isBuffer<T>(acc)
-              ? // downstream is busy, buffer the item
-                arrayPush(obj, acc)
-              : // we have a running observable, start a new buffer
-              isNotNil(acc)
-              ? // downstream is busy, start buffering
-                [obj]
-              : // downstream is idle
-                aDelegate([obj]),
-          NOTHING
+                return [aDelegate(data), bDone];
+              }
+              /**
+               * If the sequence is done, cancel the stream
+               */
+              if (bDone) {
+                idle$.complete();
+              }
+              /**
+               * Nothing more to do
+               */
+              return [NOTHING, bDone];
+            }
+            /**
+             * The done event indicates that the source closed
+             */
+            if (isDone(obj)) {
+              /**
+               * If we still have a buffer, process it
+               */
+              if (isBuffer<T>(data)) {
+                /**
+                 * Process the final buffer
+                 */
+                return [aDelegate(data), true];
+              }
+              /**
+               * If nothing is waiting downstream, close the stream
+               */
+              if (isNothing(data)) {
+                idle$.complete();
+              }
+              /**
+               * Continue with the empty buffer
+               */
+              return [NOTHING, true];
+            }
+            /**
+             * Check if we need to buffer
+             */
+            if (isBuffer<T>(data)) {
+              /**
+               * Downstream is busy, buffer
+               */
+              return [arrayPush(obj, data), bDone];
+            }
+            /**
+             * Check if downstream is busy
+             */
+            if (isNothing(data)) {
+              /**
+               * Start a new chunk
+               */
+              return [aDelegate([obj]), bDone];
+            }
+            // start a new chunk
+            return [[obj], bDone];
+          },
+          [NOTHING, false]
         ),
+        // extract the data
+        map(([data]) => data),
         // only continue if we have new work
         filter<Observable<R>>(isBusy),
         // append the resulting items and make sure we get notified about the readiness
